@@ -48,6 +48,37 @@ func TestScanModelFeed(t *testing.T) {
 	}
 }
 
+func TestScanModelTelegramFeed(t *testing.T) {
+	sm := newScanModel(nil, false)
+	sm.tg = true
+	var m tea.Model = sm
+
+	step := func(msg tea.Msg) { m, _ = m.Update(msg) }
+	step(foundMsg{endpoint: "slow:2408", epPing: 90 * time.Millisecond, tg: 40 * time.Millisecond, tgOK: true})
+	step(foundMsg{endpoint: "fast:2408", epPing: 10 * time.Millisecond})
+
+	var order []string
+	for _, r := range m.(scanModel).feed {
+		order = append(order, r.endpoint)
+	}
+	if !slices.Equal(order, []string{"slow:2408", "fast:2408"}) {
+		t.Errorf("feed order = %v, want the endpoint that reached Telegram first", order)
+	}
+
+	view := m.View()
+	for _, want := range []string{"TG", "40ms", "blocked"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("feed with -tg is missing %q:\n%s", want, view)
+		}
+	}
+
+	off := m.(scanModel)
+	off.tg = false
+	if plain := off.View(); strings.Contains(plain, "blocked") {
+		t.Errorf("feed without -tg leaks the column:\n%s", plain)
+	}
+}
+
 func TestScanModelFitsWindow(t *testing.T) {
 	var m tea.Model = newScanModel(nil, false)
 	m, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})

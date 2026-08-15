@@ -36,6 +36,8 @@ type (
 		measured bool
 		exit     string
 		colo     string
+		tg       time.Duration
+		tgOK     bool
 		torn     bool
 	}
 	speedMsg struct {
@@ -118,6 +120,7 @@ type nodeStat struct {
 type scanModel struct {
 	cancel   context.CancelFunc
 	ping     bool
+	tg       bool
 	header   string
 	quitHint string
 	st       conStyles
@@ -278,7 +281,11 @@ func countNode(nodes []nodeStat, msg foundMsg) []nodeStat {
 	return nodes
 }
 
+// Mirrors lessByLossRTT so the live feed and the final tables agree on the order.
 func lessLatency(a, b foundMsg) bool {
+	if a.tgOK != b.tgOK {
+		return a.tgOK
+	}
 	if a.loss != b.loss {
 		return a.loss < b.loss
 	}
@@ -304,6 +311,13 @@ func (m foundMsg) lossStr() string {
 		return "-"
 	}
 	return fmt.Sprintf("%.0f%%", m.loss*100)
+}
+
+func (m foundMsg) tgStr() string {
+	if !m.tgOK {
+		return "blocked"
+	}
+	return latencyStr(m.tg)
 }
 
 func (m scanModel) View() string {
@@ -478,8 +492,12 @@ func (m scanModel) renderFeed(limit int) string {
 	if m.ping {
 		tunHead = pad("TUN PING", 9) + " " + pad("LOSS", 6) + " "
 	}
+	tgHead := ""
+	if m.tg {
+		tgHead = pad("TG", 9) + " "
+	}
 	var b strings.Builder
-	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("ENDPOINT PING", 13)+" "+tunHead+pad("SEEN AS", 10)+" NODE") + "\n")
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("ENDPOINT PING", 13)+" "+tunHead+tgHead+pad("SEEN AS", 10)+" NODE") + "\n")
 	for _, r := range rows {
 		ep := pad(r.endpoint, 22)
 		ping := pad(latencyStr(r.epPing), 13)
@@ -487,8 +505,12 @@ func (m scanModel) renderFeed(limit int) string {
 		if m.ping {
 			tun = pad(latencyStr(r.tunPing), 9) + " " + pad(r.lossStr(), 6) + " "
 		}
+		tg := ""
+		if m.tg {
+			tg = pad(r.tgStr(), 9) + " "
+		}
 		if r.torn {
-			b.WriteString(st.warn.Render(ep+" "+ping+" "+tun+"torn down") + "\n")
+			b.WriteString(st.warn.Render(ep+" "+ping+" "+tun+tg+"torn down") + "\n")
 			continue
 		}
 		exit := r.exit + strings.Repeat(" ", max(0, 10-lipgloss.Width(r.exit)))
@@ -496,7 +518,14 @@ func (m scanModel) renderFeed(limit int) string {
 		if m.ping {
 			tunSeg = st.accent.Render(tun)
 		}
-		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + tunSeg + exit + " " + r.colo + "\n")
+		tgSeg := ""
+		if m.tg {
+			tgSeg = st.accent.Render(tg)
+			if !r.tgOK {
+				tgSeg = st.warn.Render(tg)
+			}
+		}
+		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + tunSeg + tgSeg + exit + " " + r.colo + "\n")
 	}
 	writeFeedRest(&b, st, extra)
 	return b.String()

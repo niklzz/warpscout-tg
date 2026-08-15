@@ -55,6 +55,8 @@ type options struct {
 	i1Explicit     bool
 	tunPingCheck   bool
 	speed          bool
+	tg             bool
+	tgOnly         bool
 	genJunk        bool
 	wantMeta       bool
 	ipv6           bool
@@ -89,6 +91,7 @@ var (
 		{"P", "tun-ping", "", fmt.Sprintf("add the TUN PING/LOSS columns: RTT and packet loss measured inside the tunnel to %s, and flag endpoints DPI tears down mid-stream; off by default for speed", pingTarget)},
 		{"", "tun-ping-count", "N", fmt.Sprintf("echoes per durability burst, %dms apart - a longer burst catches tunnels DPI kills late (default %d, implies -tun-ping)", pingInterval.Milliseconds(), durabilityPings)},
 		{"", "speed", "", "add the SPEED column: after the scan, download-test every endpoint the tables pick, one at a time (slow, and it does not change the ranking)"},
+		{"", "tg", "", "add the TG column: dial Telegram's MTProto data centres through each tunnel and report the round-trip to the nearest one, or \"blocked\" when none answer; endpoints that reach Telegram then rank above those that do not"},
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 		{"", "port", "N", "probe only this port on every endpoint instead of picking the first reachable one (skips phase 1)"},
@@ -131,6 +134,7 @@ var (
 		{"", "country", "ISO", "keep only endpoints whose edge node sits in these countries: comma-separated ISO codes"},
 		{"", "exclude-node", "COLO", "drop endpoints landing on these edge nodes: comma-separated IATA codes"},
 		{"", "exclude-country", "ISO", "drop endpoints whose edge node sits in these countries: comma-separated ISO codes"},
+		{"", "tg-only", "", "keep only endpoints that reached Telegram (implies -tg)"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
 		{"", "emoji", "", "prefix the colo region with a country flag emoji (rendering depends on the terminal)"},
@@ -251,6 +255,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	boolFlag(fs, &o.tunPingCheck, "P", "tun-ping")
 	fs.IntVar(&o.tunPingCount, "tun-ping-count", 0, "")
 	fs.BoolVar(&o.speed, "speed", false, "")
+	fs.BoolVar(&o.tg, "tg", false, "")
+	fs.BoolVar(&o.tgOnly, "tg-only", false, "")
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
 	fs.StringVar(&o.country, "country", "", "")
@@ -361,6 +367,11 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	if o.port < 0 || o.port > 65535 {
 		fmt.Fprintln(os.Stderr, "-port must be between 1 and 65535")
 		os.Exit(2)
+	}
+	// Same shape as -tun-ping-count implying -tun-ping: a filter on a measurement
+	// nobody took would silently drop every endpoint.
+	if o.tgOnly {
+		o.tg = true
 	}
 	if o.genJunk {
 		if o.proto != protoAWG {

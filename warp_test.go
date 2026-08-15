@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -1112,6 +1113,7 @@ func TestNoEndpointMsg(t *testing.T) {
 		{"masque", options{proto: protoMASQUE}, masqueBlockedMsg},
 		{"masque-h2", options{proto: protoMASQUEH2}, masqueBlockedMsg},
 		{"filters win over the hint", options{proto: protoAWG, colos: []string{"HEL"}}, "no endpoint landed on node HEL"},
+		{"tg-only", options{proto: protoAWG, tg: true, tgOnly: true}, "no working endpoint reached Telegram - drop -tg-only to see what the scan did find"},
 	}
 	for _, c := range cases {
 		if got := noEndpointMsg(c.opts); got != c.want {
@@ -1151,7 +1153,7 @@ func TestReportSpeedColumn(t *testing.T) {
 	}
 
 	var withSpeed bytes.Buffer
-	writeRows(&withSpeed, []endpointResult{r}, false, true)
+	writeRows(&withSpeed, []endpointResult{r}, false, true, false)
 	for _, want := range []string{"SPEED", "42.5 Mbps"} {
 		if !strings.Contains(withSpeed.String(), want) {
 			t.Errorf("-speed report is missing %q:\n%s", want, withSpeed.String())
@@ -1159,7 +1161,7 @@ func TestReportSpeedColumn(t *testing.T) {
 	}
 
 	var noSpeed bytes.Buffer
-	writeRows(&noSpeed, []endpointResult{r}, false, false)
+	writeRows(&noSpeed, []endpointResult{r}, false, false, false)
 	if strings.Contains(noSpeed.String(), "SPEED") || strings.Contains(noSpeed.String(), "42.5") {
 		t.Errorf("report without -speed leaks the column:\n%s", noSpeed.String())
 	}
@@ -1198,6 +1200,43 @@ func TestPicksTablePerNode(t *testing.T) {
 	}
 	if strings.Contains(out, "8.47.69.12:2408") {
 		t.Errorf("picks table shows a slower endpoint of an already listed node:\n%s", out)
+	}
+}
+
+func TestPicksTableTelegramFirst(t *testing.T) {
+	defer func(saved []netip.Prefix) { pools = saved }(pools)
+	pools, _ = parseTargets("8.47.69.0/24,8.6.112.0/24")
+
+	pick := func(addr string, ms int, tgOK bool) endpointResult {
+		return endpointResult{
+			ip:       netip.MustParseAddr(addr),
+			endpoint: addr + ":2408",
+			epPing:   time.Duration(ms) * time.Millisecond,
+			exit:     metaResult{loc: "RU", colo: "HEL"},
+			tg:       time.Duration(ms) * time.Millisecond,
+			tgOK:     tgOK,
+			tgSeen:   true,
+			ok:       true,
+			durable:  true,
+		}
+	}
+	working := []endpointResult{
+		pick("8.47.69.10", 5, false), // faster, but Telegram is blocked
+		pick("8.6.112.10", 40, true),
+	}
+
+	var buf bytes.Buffer
+	r := lipgloss.NewRenderer(&buf)
+	r.SetColorProfile(termenv.Ascii)
+	writePicksTable(&buf, newConStyles(r), working, nil, false)
+
+	out := buf.String()
+	reached, blocked := strings.Index(out, "8.6.112.10:2408"), strings.Index(out, "8.47.69.10:2408")
+	if reached < 0 || blocked < 0 {
+		t.Fatalf("picks table lost a row:\n%s", out)
+	}
+	if reached > blocked {
+		t.Errorf("picks table ranks a blocked endpoint above one that reached Telegram:\n%s", out)
 	}
 }
 
@@ -1396,7 +1435,7 @@ func TestReportPingColumns(t *testing.T) {
 	}
 
 	var withPing bytes.Buffer
-	writeRows(&withPing, []endpointResult{r}, true, false)
+	writeRows(&withPing, []endpointResult{r}, true, false, false)
 	for _, want := range []string{"ENDPOINT PING", "TUN PING", "LOSS", "30ms", "90ms", "10%"} {
 		if !strings.Contains(withPing.String(), want) {
 			t.Errorf("-tun-ping report is missing %q:\n%s", want, withPing.String())
@@ -1404,7 +1443,7 @@ func TestReportPingColumns(t *testing.T) {
 	}
 
 	var noPing bytes.Buffer
-	writeRows(&noPing, []endpointResult{r}, false, false)
+	writeRows(&noPing, []endpointResult{r}, false, false, false)
 	for _, unwanted := range []string{"TUN PING", "LOSS", "90ms", "10%"} {
 		if strings.Contains(noPing.String(), unwanted) {
 			t.Errorf("report without -tun-ping leaks %q:\n%s", unwanted, noPing.String())
@@ -1589,5 +1628,127 @@ func TestReadVersionCache(t *testing.T) {
 	}
 	if _, ok := readVersionCache(filepath.Join(t.TempDir(), "absent"), time.Hour); ok {
 		t.Error("a missing cache must miss")
+	}
+}
+
+func TestFirstReachable(t *testing.T) {
+	answering := func(delays map[string]time.Duration) dialFunc {
+		return func(ctx context.Context, addr string) (net.Conn, error) {
+			d, ok := delays[addr]
+			if !ok {
+				return nil, fmt.Errorf("connection refused")
+			}
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			c, other := net.Pipe()
+			other.Close()
+			return c, nil
+		}
+	}
+	addrs := []string{"slow:443", "fast:443", "dead:443"}
+
+	rtt, ok := firstReachable(context.Background(), answering(map[string]time.Duration{
+		"slow:443": 300 * time.Millisecond,
+		"fast:443": 10 * time.Millisecond,
+	}), addrs, time.Second)
+	if !ok {
+		t.Fatal("firstReachable missed the DC that answered")
+	}
+	if rtt >= 300*time.Millisecond {
+		t.Errorf("firstReachable waited for the slow DC: rtt = %v", rtt)
+	}
+
+	if _, ok := firstReachable(context.Background(), answering(nil), addrs, time.Second); ok {
+		t.Error("firstReachable reported a refused set as reachable")
+	}
+
+	// Every dial hangs: the shared deadline is the ceiling, not len(addrs) x timeout.
+	hang := func(ctx context.Context, _ string) (net.Conn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	start := time.Now()
+	if _, ok := firstReachable(context.Background(), hang, addrs, 100*time.Millisecond); ok {
+		t.Error("firstReachable reported a hanging set as reachable")
+	}
+	if waited := time.Since(start); waited > 500*time.Millisecond {
+		t.Errorf("firstReachable waited %v, want a single shared timeout", waited)
+	}
+}
+
+func TestTelegramColumn(t *testing.T) {
+	reached := endpointResult{endpoint: "1.2.3.4:2408", tg: 40 * time.Millisecond, tgOK: true, tgSeen: true, ok: true, durable: true}
+	blocked := endpointResult{endpoint: "5.6.7.8:2408", tgSeen: true, ok: true, durable: true}
+	unchecked := endpointResult{endpoint: "9.9.9.9:2408", ok: true, durable: true}
+
+	if !anyTG([]endpointResult{unchecked, blocked}) {
+		t.Error("anyTG missed an endpoint the check ran on")
+	}
+	if anyTG([]endpointResult{unchecked}) {
+		t.Error("anyTG reported an unchecked set as checked")
+	}
+	for _, c := range []struct {
+		r    endpointResult
+		want string
+	}{{reached, "40ms"}, {blocked, "blocked"}, {unchecked, "-"}} {
+		if got := tgStr(c.r); got != c.want {
+			t.Errorf("tgStr(%s) = %q, want %q", c.r.endpoint, got, c.want)
+		}
+	}
+
+	var withTG bytes.Buffer
+	writeFullReport(&withTG, []endpointResult{reached, blocked}, false)
+	for _, want := range []string{"TG", "40ms", "blocked", "Telegram reachability"} {
+		if !strings.Contains(withTG.String(), want) {
+			t.Errorf("-tg report is missing %q:\n%s", want, withTG.String())
+		}
+	}
+
+	var noTG bytes.Buffer
+	writeFullReport(&noTG, []endpointResult{unchecked}, false)
+	for _, unwanted := range []string{"TG", "Telegram"} {
+		if strings.Contains(noTG.String(), unwanted) {
+			t.Errorf("report without -tg leaks %q:\n%s", unwanted, noTG.String())
+		}
+	}
+}
+
+func TestLessByLossRTTTelegram(t *testing.T) {
+	reached := endpointResult{endpoint: "1.2.3.4:2408", epPing: 200 * time.Millisecond, tgOK: true, tgSeen: true}
+	fast := endpointResult{endpoint: "5.6.7.8:2408", epPing: 10 * time.Millisecond, tgSeen: true}
+
+	if !lessByLossRTT(reached, fast) {
+		t.Error("an endpoint that reached Telegram must rank first even when slower")
+	}
+	if lessByLossRTT(fast, reached) {
+		t.Error("a faster endpoint without Telegram must not outrank one with it")
+	}
+
+	// Without -tg no result carries tgOK, so the old ordering has to survive.
+	a, b := reached, fast
+	a.tgOK, a.tgSeen, b.tgSeen = false, false, false
+	if lessByLossRTT(a, b) {
+		t.Error("without -tg the slower endpoint must not rank first")
+	}
+}
+
+func TestFilterTelegram(t *testing.T) {
+	ph := phaseResult{run: protoRun{kindWG, "wg"}, results: []endpointResult{
+		{endpoint: "1.2.3.4:2408", tgOK: true, tgSeen: true, ok: true, durable: true},
+		{endpoint: "5.6.7.8:2408", tgSeen: true, ok: true, durable: true},
+	}}
+
+	if !filtered(options{tgOnly: true}) {
+		t.Error("filtered() does not count -tg-only as a filter")
+	}
+	got := applyFilters(ph, options{tgOnly: true})
+	if len(got.results) != 1 || got.results[0].endpoint != "1.2.3.4:2408" {
+		t.Errorf("-tg-only kept %v, want only the endpoint that reached Telegram", got.results)
+	}
+	if n := len(applyFilters(ph, options{}).results); n != 2 {
+		t.Errorf("without -tg-only the filter dropped %d endpoints", 2-n)
 	}
 }

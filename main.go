@@ -316,7 +316,7 @@ func anyEndpoint(ph phaseResult) bool {
 }
 
 func filtered(opts options) bool {
-	return len(opts.colos)+len(opts.countries)+len(opts.dropColos)+len(opts.dropCountries) > 0
+	return opts.tgOnly || len(opts.colos)+len(opts.countries)+len(opts.dropColos)+len(opts.dropCountries) > 0
 }
 
 func applyFilters(ph phaseResult, opts options) phaseResult {
@@ -333,6 +333,9 @@ func applyFilters(ph phaseResult, opts options) phaseResult {
 		if len(f.list) > 0 {
 			ph = f.by(ph, f.list, f.want)
 		}
+	}
+	if opts.tgOnly {
+		ph = filterByTelegram(ph)
 	}
 	return ph
 }
@@ -356,6 +359,9 @@ func noEndpointMsg(opts options) string {
 	}
 	if len(filters) > 0 {
 		return "every endpoint was excluded by " + strings.Join(filters, " and ")
+	}
+	if opts.tgOnly {
+		return "no working endpoint reached Telegram - drop -tg-only to see what the scan did find"
 	}
 	if opts.proto == protoMASQUE || opts.proto == protoMASQUEH2 {
 		return masqueBlockedMsg
@@ -450,6 +456,7 @@ func runWithUI(opts options, cancel context.CancelFunc, ping bool, header, quitH
 
 	m := newScanModel(cancel, ping)
 	m.header = header
+	m.tg = opts.tg
 	m.dropLists = tablesFollow(opts)
 	if quitHint != "" {
 		m.quitHint = quitHint
@@ -514,6 +521,13 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 			if pings > 0 {
 				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !torn
 			}
+			// The tunnel is still up and still pointed at this endpoint - the peer
+			// only changes on the next handshake - so Telegram is dialled over the
+			// very connection the row is about.
+			if opts.tg {
+				r.tgSeen = true
+				r.tg, r.tgOK = tn.stack().telegramRTT(ctx, timeout)
+			}
 			// Host ICMP measures the direct path, which a nested run does not take;
 			// from inside the outer tunnel the same echo walks the real one.
 			if outer == nil {
@@ -523,7 +537,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 			} else if hrtt, pok := outer.pingTo(ip, timeout); pok {
 				r.epPing = hrtt
 			}
-			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, torn: !r.durable}
+			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, tg: r.tg, tgOK: r.tgOK, torn: !r.durable}
 			if opts.wantMeta {
 				found.exit, found.colo = exitRegion(t), exitColo(t)
 			}
