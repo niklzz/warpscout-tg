@@ -2,7 +2,7 @@
 
 set -e
 
-REPO="vernette/warpscout"
+REPO="niklzz/warpscout-tg"
 BIN_NAME="warpscout"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 

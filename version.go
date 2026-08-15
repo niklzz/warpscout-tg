@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	ghLatestURL = "https://api.github.com/repos/vernette/warpscout/releases/latest"
+	ghLatestURL = "https://api.github.com/repos/niklzz/warpscout-tg/releases/latest"
 
 	updateCheckTimeout = 2 * time.Second
 	updateCacheTTL     = 6 * time.Hour
