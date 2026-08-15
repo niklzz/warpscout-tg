@@ -5,11 +5,10 @@
 <p align="center">Поиск эндпоинтов Cloudflare WARP, которые работают из вашей сети, и проверка того, где они выходят.</p>
 
 <p align="center">
-  <a href="https://github.com/vernette/warpscout/releases"><img src="https://img.shields.io/github/release/vernette/warpscout.svg" alt="GitHub Release"></a>
-  <a href="https://github.com/vernette/warpscout/actions/workflows/release.yaml"><img src="https://img.shields.io/github/actions/workflow/status/vernette/warpscout/release.yaml" alt="Build Status"></a>
-  <a href="https://github.com/vernette/warpscout/actions/workflows/test.yaml"><img src="https://img.shields.io/github/actions/workflow/status/vernette/warpscout/test.yaml?label=tests" alt="Tests"></a>
-  <a href="https://github.com/vernette/warpscout/releases"><img src="https://img.shields.io/github/downloads/vernette/warpscout/total" alt="GitHub Downloads"></a>
-  <a href="https://hub.docker.com/r/vernette/warpscout"><img src="https://img.shields.io/docker/pulls/vernette/warpscout?logo=docker" alt="Docker Pulls"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/releases"><img src="https://img.shields.io/github/release/niklzz/warpscout-tg.svg" alt="GitHub Release"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/actions/workflows/release.yaml"><img src="https://img.shields.io/github/actions/workflow/status/niklzz/warpscout-tg/release.yaml" alt="Build Status"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/actions/workflows/test.yaml"><img src="https://img.shields.io/github/actions/workflow/status/niklzz/warpscout-tg/test.yaml?label=tests" alt="Tests"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/releases"><img src="https://img.shields.io/github/downloads/niklzz/warpscout-tg/total" alt="GitHub Downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
 
@@ -91,13 +90,13 @@
 Через curl:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh
 ```
 
 Через wget (на роутерах с OpenWrt curl по умолчанию нет):
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh
 ```
 
 Скрипт сам подберёт архив под вашу систему и положит `warpscout` в `~/.local/bin`, на OpenWrt - в `/usr/bin`, а в Termux - в `$PREFIX/bin`. Скрипт можно использовать и для обновления, повторно запустив его.
@@ -109,10 +108,10 @@ wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh
 Опции передаются после `sh -s --`, а `INSTALL_DIR` выбирает другой каталог:
 
 ```sh
-INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh)"
+INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh)"
 
-curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --version v0.8.1
-curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh -s -- --version v0.8.1
+curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh -s -- --uninstall
 ```
 
 ### Arch Linux (AUR)
@@ -128,7 +127,7 @@ paru -S warpscout-bin  # готовый бинарник из релиза
 
 ### Скачать бинарный файл
 
-Откройте самый свежий релиз на [странице релизов](https://github.com/vernette/warpscout/releases). Там лежат по одному архиву на ОС, выберите свой:
+Откройте самый свежий релиз на [странице релизов](https://github.com/niklzz/warpscout-tg/releases). Там лежат по одному архиву на ОС, выберите свой:
 
 | Ваша ОС                                | Файл                   |
 | -------------------------------------- | ---------------------- |
@@ -175,20 +174,20 @@ warpscout.exe register
 С Go 1.25 или новее:
 
 ```sh
-go install github.com/vernette/warpscout@latest
+go install github.com/niklzz/warpscout-tg@latest
 ```
 
 ### Docker
 
 ```sh
 # Регистрация аккаунта WARP
-docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout register
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg register
 
 # Скан по обычному WireGuard
-docker run --pull always --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout scan
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg scan
 
 # Скан по AmneziaWG
-docker run --pull always --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout scan -p awg
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg scan -p awg
 ```
 
 Зачем нужны эти флаги - см. [Docker](#docker-1).
@@ -306,6 +305,8 @@ warpscout scan -p awg -gen-i1 quic
 | `-P, -tun-ping`     | Добавляет колонки `TUN PING` и `LOSS` - RTT и потери, измеренные внутри туннеля - и помечает эндпоинты, которые DPI рвёт посреди передачи. По умолчанию выключено, так как занимает больше времени. |
 | `-tun-ping-count N` | Сколько эхо-пакетов на эндпоинт (по умолчанию 10, минимум 5). Включает `-tun-ping`. Чем длиннее серия, тем вернее ловятся туннели, рвущиеся через секунду-другую.                                   |
 | `-speed`            | Добавляет колонку `SPEED`: после скана по очереди замеряет скорость скачивания у каждого эндпоинта, попавшего в таблицы. Медленно, и на порядок сортировки не влияет - см. ниже.                    |
+| `-tg`               | Добавляет колонку `TG`: дозванивается через каждый туннель до дата-центров MTProto Telegram и показывает отклик ближайшего ответившего или `blocked`. Эндпоинты, из которых Telegram доступен, встают в таблице выше остальных - см. ниже. |
+| `-tg-only`          | Оставить только эндпоинты, из которых Telegram доступен. Включает `-tg`.                                                                                                                            |
 | `-n, -sample N`     | Сколько адресов пробовать в каждой подсети (по умолчанию 5).                                                                                                                                        |
 | `-f, -full`         | Пробовать все 256 адресов каждой подсети. Медленно, но тщательно.                                                                                                                                   |
 | `-port N`           | Проверять только этот порт на каждом эндпоинте, вместо того чтобы брать первый доступный. Фаза 1 при этом пропускается.                                                                             |
@@ -350,6 +351,24 @@ warpscout scan -p awg -P -speed
 Порядок сортировки при этом не меняется: он по-прежнему по потерям и пингу, и `-best`/`-conf` выбирают тот же эндпоинт, что и без флага - скорость показывается справочно, ранжирование по ней не делается. С `-best` или `-conf -` без файла отчёта фаза не запускается вовсе: колонку было бы негде показать.
 
 Файл отчёта - плоский список: закомментированная шапка, дальше все рабочие эндпоинты, дальше разорванные, в конце лучший эндпоинт каждого пограничного узла. Легко обрабатывается скриптами.
+
+#### Telegram: `-tg`
+
+`-tg` добавляет колонку `TG`. Как только туннель до эндпоинта поднят и проверен, warpscout дозванивается через этот же туннель до дата-центров MTProto Telegram и показывает время отклика ближайшего ответившего - или `blocked`, если не ответил ни один:
+
+```sh
+warpscout scan -p awg -tg
+```
+
+Дозвон идёт по TCP прямо на адреса дата-центров, ровно как это делает клиент Telegram: имя не резолвится, SNI не отправляется. То есть колонка отвечает на вопрос, дотягивается ли выход до Telegram вообще, а не переживает ли DPI конкретное имя хоста. Все пять дата-центров пробуются одновременно, побеждает первый ответивший, поэтому эндпоинт, из которого хода нет, стоит одного `-timeout`, а не пяти.
+
+В отличие от `-speed`, этот флаг **меняет** порядок сортировки: эндпоинт, из которого Telegram доступен, встаёт выше недоступного независимо от пинга, поэтому `-best` и `-conf` выбирают рабочий вариант. `-tg-only` идёт дальше и выбрасывает остальные совсем:
+
+```sh
+warpscout scan -p awg -tg-only -best
+```
+
+`-tg-only` включает `-tg`. Если Telegram недоступен ниоткуда, скан прямо об этом сообщает и завершается с ненулевым кодом, вместо того чтобы оставить отчёт из бесполезных эндпоинтов.
 
 #### Эндпоинты, помеченные как `torn down`
 
@@ -689,8 +708,8 @@ warpscout scan -p awg -through 188.114.97.177:2408 -conf warp.yaml -conf-type mi
 Примонтируйте директорию, иначе аккаунт умрёт вместе с контейнером и регистрироваться придётся каждый раз:
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout register
-docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout scan -p awg
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg register
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg scan -p awg
 ```
 
 > [!NOTE]
@@ -706,7 +725,7 @@ docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscou
 
 ```sh
 docker run --rm -it --sysctl net.ipv4.ping_group_range="0 2147483647" \
-  -v "$PWD:/data" vernette/warpscout scan -p awg
+  -v "$PWD:/data" warpscout-tg scan -p awg
 ```
 
 `TUN PING` работает внутри туннеля и не требует привилегий ни в каком контейнере.
@@ -716,8 +735,8 @@ docker run --rm -it --sysctl net.ipv4.ping_group_range="0 2147483647" \
 `-6` и `-I` требуют сети хоста. У контейнера своё сетевое пространство имён, интерфейсов хоста там нет, а IPv6 обычно выключен, поэтому запускайте с сетью хоста:
 
 ```sh
-docker run --rm -it --network host -v "$PWD:/data" vernette/warpscout scan -p awg -6
-docker run --rm -it --network host -v "$PWD:/data" vernette/warpscout scan -p awg -I eth0
+docker run --rm -it --network host -v "$PWD:/data" warpscout-tg scan -p awg -6
+docker run --rm -it --network host -v "$PWD:/data" warpscout-tg scan -p awg -I eth0
 ```
 
 ### Собрать образ
@@ -727,7 +746,7 @@ docker run --rm -it --network host -v "$PWD:/data" vernette/warpscout scan -p aw
 docker build -t warpscout .
 
 # под другую платформу
-docker buildx build --platform linux/arm64 -t vernette/warpscout:arm --load .
+docker buildx build --platform linux/arm64 -t warpscout-tg:arm --load .
 ```
 
 ## Решение проблем

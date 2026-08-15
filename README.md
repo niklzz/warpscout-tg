@@ -5,11 +5,10 @@
 <p align="center">Find Cloudflare WARP endpoints that work from your network, and see where they come out.</p>
 
 <p align="center">
-  <a href="https://github.com/vernette/warpscout/releases"><img src="https://img.shields.io/github/release/vernette/warpscout.svg" alt="GitHub Release"></a>
-  <a href="https://github.com/vernette/warpscout/actions/workflows/release.yaml"><img src="https://img.shields.io/github/actions/workflow/status/vernette/warpscout/release.yaml" alt="Build Status"></a>
-  <a href="https://github.com/vernette/warpscout/actions/workflows/test.yaml"><img src="https://img.shields.io/github/actions/workflow/status/vernette/warpscout/test.yaml?label=tests" alt="Tests"></a>
-  <a href="https://github.com/vernette/warpscout/releases"><img src="https://img.shields.io/github/downloads/vernette/warpscout/total" alt="GitHub Downloads"></a>
-  <a href="https://hub.docker.com/r/vernette/warpscout"><img src="https://img.shields.io/docker/pulls/vernette/warpscout?logo=docker" alt="Docker Pulls"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/releases"><img src="https://img.shields.io/github/release/niklzz/warpscout-tg.svg" alt="GitHub Release"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/actions/workflows/release.yaml"><img src="https://img.shields.io/github/actions/workflow/status/niklzz/warpscout-tg/release.yaml" alt="Build Status"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/actions/workflows/test.yaml"><img src="https://img.shields.io/github/actions/workflow/status/niklzz/warpscout-tg/test.yaml?label=tests" alt="Tests"></a>
+  <a href="https://github.com/niklzz/warpscout-tg/releases"><img src="https://img.shields.io/github/downloads/niklzz/warpscout-tg/total" alt="GitHub Downloads"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
 
@@ -91,13 +90,13 @@ Keep in mind that a single `/24` subnet can hand out several different edge node
 With curl:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh
 ```
 
 With wget (OpenWrt routers have no curl by default):
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh
 ```
 
 It picks the archive for your system and puts `warpscout` into `~/.local/bin`, into `/usr/bin` on OpenWrt, or into `$PREFIX/bin` in Termux. Running it again is also how you update.
@@ -109,10 +108,10 @@ Delete it to force the check to run again.
 The script takes options after `sh -s --`, and `INSTALL_DIR` picks another directory:
 
 ```sh
-INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh)"
+INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh)"
 
-curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --version v0.8.1
-curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh -s -- --version v0.8.1
+curl -fsSL https://raw.githubusercontent.com/niklzz/warpscout-tg/master/install.sh | sh -s -- --uninstall
 ```
 
 ### Arch Linux (AUR)
@@ -128,7 +127,7 @@ paru -S warpscout-bin  # the release binary
 
 ### Download a binary
 
-Open the newest release on the [Releases page](https://github.com/vernette/warpscout/releases). There is one archive per OS, pick yours:
+Open the newest release on the [Releases page](https://github.com/niklzz/warpscout-tg/releases). There is one archive per OS, pick yours:
 
 | Your OS                               | File                   |
 | ------------------------------------- | ---------------------- |
@@ -175,20 +174,20 @@ warpscout.exe register
 With Go 1.25 or newer:
 
 ```sh
-go install github.com/vernette/warpscout@latest
+go install github.com/niklzz/warpscout-tg@latest
 ```
 
 ### Docker
 
 ```sh
 # Register WARP account
-docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout register
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg register
 
 # Plain WireGuard scan
-docker run --pull always --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout scan
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg scan
 
 # AmneziaWG scan
-docker run --pull always --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout scan -p awg
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg scan -p awg
 ```
 
 See [Docker](#docker-1) for what the flags are for.
@@ -306,6 +305,8 @@ Results are sorted by packet loss first, then by ping, so the top row is the bes
 | `-P, -tun-ping`     | Add the `TUN PING` and `LOSS` columns - RTT and packet loss measured inside the tunnel - and flag endpoints DPI tears down mid-stream. Off by default, since it takes longer. |
 | `-tun-ping-count N` | How many echoes per endpoint (default 10, minimum 5). Implies `-tun-ping`. The longer the burst, the more reliably it catches tunnels torn down a second or two in.           |
 | `-speed`            | Add the `SPEED` column: after the scan, download-test every endpoint the tables pick, one at a time. Kinda slow, and it does not change the ranking - see below.              |
+| `-tg`               | Add the `TG` column: dial Telegram's MTProto data centres through every tunnel and show the round-trip to the nearest one, or `blocked`. Endpoints that reach Telegram rank first - see below. |
+| `-tg-only`          | Keep only the endpoints Telegram was reachable from. Implies `-tg`.                                                                                                           |
 | `-n, -sample N`     | Addresses to try per subnet (default 5).                                                                                                                                      |
 | `-f, -full`         | Try all 256 addresses of every subnet. Slow but thorough.                                                                                                                     |
 | `-port N`           | Probe only this port on every endpoint, instead of taking the first reachable one. Phase 1 is skipped.                                                                        |
@@ -348,6 +349,24 @@ It is a phase of its own - `Speedtest phase` in the live dashboard, right after 
 The ranking does not change. Sorting stays on loss and ping, and `-best`/`-conf` pick the same endpoint they would without the flag - the speed is there to look at, not to rank by. With `-best` or `-conf -` and no report file, the phase is skipped entirely: there would be nowhere to show the column.
 
 The report file is a flat list: a commented header, then every working endpoint, then the torn-down ones, and the best endpoint of each edge node at the end. Easy to process with scripts.
+
+#### Telegram: `-tg`
+
+`-tg` adds a `TG` column. As soon as the tunnel to an endpoint is up and verified, warpscout dials Telegram's MTProto data centres through that same tunnel and shows the round-trip to the nearest one that answered - or `blocked`, when none of them did:
+
+```sh
+warpscout scan -p awg -tg
+```
+
+The dial goes to the data centre addresses over TCP, exactly the way a Telegram client does it: no name is resolved and no SNI is sent, so the column answers whether the exit reaches Telegram at all, rather than whether some hostname survives DPI. All five data centres are tried at once and the first answer wins, so an endpoint with no way through costs one `-timeout`, not five.
+
+Unlike `-speed`, this one **does** change the ranking: an endpoint that reached Telegram sorts above one that did not, whatever the ping says, so `-best` and `-conf` pick an endpoint that works. `-tg-only` goes further and throws the rest away:
+
+```sh
+warpscout scan -p awg -tg-only -best
+```
+
+`-tg-only` implies `-tg`. When nothing reaches Telegram the scan says so and exits non-zero instead of leaving a report full of endpoints that are of no use.
 
 #### Endpoints marked `torn down`
 
@@ -687,8 +706,8 @@ The image is multi-arch (`linux/amd64` and `linux/arm64`). The container's worki
 Mount a directory, or the account dies with the container and you have to register every single time:
 
 ```sh
-docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout register
-docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" vernette/warpscout scan -p awg
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg register
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" warpscout-tg scan -p awg
 ```
 
 > [!NOTE]
@@ -704,7 +723,7 @@ On a current Docker there is nothing to do, `ENDPOINT PING` works out of the box
 
 ```sh
 docker run --rm -it --sysctl net.ipv4.ping_group_range="0 2147483647" \
-  -v "$PWD:/data" vernette/warpscout scan -p awg
+  -v "$PWD:/data" warpscout-tg scan -p awg
 ```
 
 `TUN PING` runs inside the tunnel and needs no privileges in any container.
@@ -714,8 +733,8 @@ docker run --rm -it --sysctl net.ipv4.ping_group_range="0 2147483647" \
 `-6` and `-I` need the host's network. A container gets its own network namespace, where the host interfaces do not exist and IPv6 is usually off, so run it with the host network:
 
 ```sh
-docker run --rm -it --network host -v "$PWD:/data" vernette/warpscout scan -p awg -6
-docker run --rm -it --network host -v "$PWD:/data" vernette/warpscout scan -p awg -I eth0
+docker run --rm -it --network host -v "$PWD:/data" warpscout-tg scan -p awg -6
+docker run --rm -it --network host -v "$PWD:/data" warpscout-tg scan -p awg -I eth0
 ```
 
 ### Build the image
@@ -725,7 +744,7 @@ docker run --rm -it --network host -v "$PWD:/data" vernette/warpscout scan -p aw
 docker build -t warpscout .
 
 # for another platform
-docker buildx build --platform linux/arm64 -t vernette/warpscout:arm --load .
+docker buildx build --platform linux/arm64 -t warpscout-tg:arm --load .
 ```
 
 ## Troubleshooting
