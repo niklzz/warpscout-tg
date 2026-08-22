@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1676,6 +1677,57 @@ func TestFirstReachable(t *testing.T) {
 	}
 	if waited := time.Since(start); waited > 500*time.Millisecond {
 		t.Errorf("firstReachable waited %v, want a single shared timeout", waited)
+	}
+}
+
+func TestMTProtoProbe(t *testing.T) {
+	run := func(server func(net.Conn)) error {
+		client, dc := net.Pipe()
+		defer client.Close()
+		go server(dc)
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+		return mtprotoProbe(ctx, client)
+	}
+
+	answer := func(reply []byte) func(net.Conn) {
+		return func(c net.Conn) {
+			defer c.Close()
+			req := make([]byte, 4+4+40)
+			if _, err := io.ReadFull(c, req); err != nil {
+				t.Errorf("fake DC read: %v", err)
+				return
+			}
+			if !bytes.Equal(req[:4], []byte{0xee, 0xee, 0xee, 0xee}) {
+				t.Errorf("probe magic = % x, want intermediate transport", req[:4])
+			}
+			if n := binary.LittleEndian.Uint32(req[4:8]); n != 40 {
+				t.Errorf("probe frame length = %d, want 40", n)
+			}
+			if !bytes.Equal(req[8:16], make([]byte, 8)) {
+				t.Error("probe auth_key_id is not zero, DC would drop it")
+			}
+			if c := binary.LittleEndian.Uint32(req[28:32]); c != 0xbe7e8ef1 {
+				t.Errorf("probe constructor = %#x, want req_pq_multi", c)
+			}
+			c.Write(reply)
+		}
+	}
+
+	resPQ := binary.LittleEndian.AppendUint32(nil, 84)
+	resPQ = append(resPQ, make([]byte, 84)...)
+	if err := run(answer(resPQ)); err != nil {
+		t.Errorf("probe against an answering DC: %v", err)
+	}
+
+	if err := run(answer(make([]byte, 4))); err == nil {
+		t.Error("probe accepted a zero-length frame")
+	}
+
+	// A DPI box that completes the handshake and eats the payload: the read
+	// must time out instead of reporting the DC as reachable.
+	if err := run(func(c net.Conn) { io.Copy(io.Discard, c) }); err == nil {
+		t.Error("probe reported a silent connection as answered")
 	}
 }
 
