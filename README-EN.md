@@ -10,9 +10,9 @@ Upstream scans Cloudflare WARP endpoints and reports where each one comes out - 
 
 This fork adds that check, and lets it decide:
 
-- **`-tg`** - a `TG` column. As soon as a tunnel is up and verified, all five MTProto data centres are dialled through that same tunnel over TCP, at once, first answer wins. The column shows the round-trip to it, or `blocked` when none answered. No name is resolved and no SNI is sent - exactly what a Telegram client does, so the column is about the exit, not about some hostname surviving DPI. A blocked endpoint costs one `-timeout`, not five.
+- **`-tg`** - a `TG` column. As soon as a tunnel is up and verified, a real MTProto request (`req_pq`) is sent through that same tunnel to all five MTProto data centres at once, first DC to answer wins. A completed TCP connect alone proves nothing: DPI finishes the handshake toward Telegram and silently eats the payload, so `TG` only counts when a DC actually talked back. The column shows the time to its answer, or `blocked` when none did. No name is resolved and no SNI is sent - exactly what a Telegram client does, so the column is about the exit, not about some hostname surviving DPI. A blocked endpoint costs one `-timeout`, not five.
 - **Reaching Telegram outranks every latency metric.** An endpoint that reached Telegram sorts above one that did not, whatever the ping says, so `-best` and `-conf` pick something that works.
-- **`-tg-only`** - throw the rest away (implies `-tg`). If nothing reaches Telegram, the scan says so and exits non-zero instead of writing a report full of useless endpoints.
+- **`-tg-only`** - throw the rest away (implies `-tg`). Since only Telegram-working endpoints survive, they are ranked by the Telegram RTT instead of the endpoint ping - `-best` and `-conf` take the one Telegram is fastest through. If nothing reaches Telegram, the scan says so and exits non-zero instead of writing a report full of useless endpoints.
 
 Nothing else is changed: same protocols, same flags, same output, same account files. Everything below is the short version - **the full documentation is upstream, in [vernette/warpscout](https://github.com/vernette/warpscout)**, and it applies here as written.
 
