@@ -1787,6 +1787,35 @@ func TestLessByLossRTTTelegram(t *testing.T) {
 	}
 }
 
+func TestLessByLossRTTTGSort(t *testing.T) {
+	defer func(prev bool) { tgSort = prev }(tgSort)
+
+	tgFast := endpointResult{endpoint: "1.2.3.4:2408", epPing: 200 * time.Millisecond, tg: 90 * time.Millisecond, tgOK: true, tgSeen: true}
+	tgSlow := endpointResult{endpoint: "5.6.7.8:2408", epPing: 10 * time.Millisecond, tg: 400 * time.Millisecond, tgOK: true, tgSeen: true}
+
+	// Plain -tg: both reached Telegram, so the endpoint ping decides.
+	tgSort = false
+	if lessByLossRTT(tgFast, tgSlow) {
+		t.Error("under -tg alone the Telegram RTT must not override the ping")
+	}
+
+	// -tg-only: the Telegram RTT is the metric, whatever the ping says.
+	tgSort = true
+	if !lessByLossRTT(tgFast, tgSlow) {
+		t.Error("under -tg-only the lower Telegram RTT must rank first")
+	}
+	if lessByLossRTT(tgSlow, tgFast) {
+		t.Error("under -tg-only the higher Telegram RTT must not rank first")
+	}
+
+	// Equal Telegram RTT falls back to the usual loss/ping ordering.
+	same := tgFast
+	same.tg = tgSlow.tg
+	if !lessByLossRTT(tgSlow, same) {
+		t.Error("equal Telegram RTT must fall back to the ping ordering")
+	}
+}
+
 func TestFilterTelegram(t *testing.T) {
 	ph := phaseResult{run: protoRun{kindWG, "wg"}, results: []endpointResult{
 		{endpoint: "1.2.3.4:2408", tgOK: true, tgSeen: true, ok: true, durable: true},

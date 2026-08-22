@@ -173,6 +173,9 @@ func tgHeaders(show bool) []string {
 // -tg outranks every latency metric, so both notes say so: otherwise a slower
 // top row reads as a sorting bug.
 func sortNote(ping, tg bool) string {
+	if tg && tgSort {
+		return "sorted by Telegram RTT (-tg-only), then " + rankNote(ping)
+	}
 	if tg {
 		return "sorted by Telegram reachability first, then " + rankNote(ping)
 	}
@@ -180,6 +183,9 @@ func sortNote(ping, tg bool) string {
 }
 
 func bestNote(ping, tg bool) string {
+	if tg && tgSort {
+		return "lowest Telegram RTT, then lowest " + rankNote(ping)
+	}
 	if tg {
 		return "Telegram reachable first, then lowest " + rankNote(ping)
 	}
@@ -306,6 +312,11 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 	return out
 }
 
+// Under -tg-only every survivor reached Telegram, so reachability alone stops
+// ordering anything - the Telegram RTT takes over as the ranking metric.
+// Set once in setupScan, like the rest of the flag globals.
+var tgSort bool
+
 // Loss before ping, mirroring CloudflareWarpSpeedTest. Unmeasured endpoints
 // carry loss 0, so without -tun-ping this degrades to ping-only ordering.
 //
@@ -315,6 +326,9 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 func lessByLossRTT(a, b endpointResult) bool {
 	if a.tgOK != b.tgOK {
 		return a.tgOK
+	}
+	if tgSort && a.tgOK && a.tg != b.tg {
+		return a.tg < b.tg
 	}
 	if a.loss != b.loss {
 		return a.loss < b.loss
@@ -505,6 +519,7 @@ type pickRow struct {
 	cells   []string
 	status  int
 	tgOK    bool
+	tg      time.Duration
 	loss    float32
 	latency time.Duration
 }
@@ -545,7 +560,7 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 			for _, r := range nodePicks(picks) {
 				cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
 				cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
-				rows = append(rows, pickRow{cells, statusOK, r.tgOK, r.loss, r.sortPing()})
+				rows = append(rows, pickRow{cells, statusOK, r.tgOK, r.tg, r.loss, r.sortPing()})
 			}
 			continue
 		}
@@ -553,13 +568,13 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
 			cells = append(cells, "torn down", "", "")
-			rows = append(rows, pickRow{cells, statusTorn, r.tgOK, r.loss, r.sortPing()})
+			rows = append(rows, pickRow{cells, statusTorn, r.tgOK, r.tg, r.loss, r.sortPing()})
 			continue
 		}
 		cells := []string{subnet, "no working endpoints", ""}
 		cells = append(cells, make([]string, len(tunHeaders(ping))+len(tgHeaders(tg))+len(speedHeaders(speed)))...)
 		cells = append(cells, "", "", "")
-		rows = append(rows, pickRow{cells, statusNone, false, 0, 0})
+		rows = append(rows, pickRow{cells, statusNone, false, 0, 0, 0})
 	}
 	// Status first: a subnet with no result carries a synthetic 0% loss, which
 	// would otherwise sort it above a working endpoint that measured any loss.
@@ -570,6 +585,9 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 		}
 		if rows[i].tgOK != rows[j].tgOK {
 			return rows[i].tgOK
+		}
+		if tgSort && rows[i].tgOK && rows[i].tg != rows[j].tg {
+			return rows[i].tg < rows[j].tg
 		}
 		return lessLossDur(rows[i].loss, rows[i].latency, rows[j].loss, rows[j].latency)
 	})

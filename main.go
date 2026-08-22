@@ -32,6 +32,7 @@ func setupScan(opts options) (protoRun, []netip.Addr, error) {
 	if len(opts.targets) > 0 {
 		pools = opts.targets
 	}
+	tgSort = opts.tgOnly
 	// With -interface, interfaceAddr is the authoritative family check (per-interface,
 	// precise error); the host-wide check only runs without it.
 	if opts.iface != "" {
