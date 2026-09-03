@@ -1,6 +1,6 @@
 <h1 align="center">WARPSCOUT-TG</h1>
 
-<p align="center">Форк <a href="https://github.com/vernette/warpscout">vernette/warpscout</a>, который выбирает WARP-эндпоинты, через которые реально работает Telegram.</p>
+<p align="center">Форк <a href="https://github.com/vernette/warpscout">vernette/warpscout</a>, который показывает WARP-эндпоинты, через которые реально работает Telegram.</p>
 
 <p align="center">Документация: 🇷🇺 Русский &middot; <a href="README-EN.md">🇬🇧 English</a></p>
 
