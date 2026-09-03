@@ -37,6 +37,7 @@ type (
 		exit     string
 		colo     string
 		tg       time.Duration
+		tgDCs    uint8
 		tgOK     bool
 		torn     bool
 	}
@@ -315,7 +316,7 @@ func (m foundMsg) lossStr() string {
 
 func (m foundMsg) tgStr() string {
 	if !m.tgOK {
-		return "blocked"
+		return tgPartialStr(m.tgDCs)
 	}
 	return latencyStr(m.tg)
 }

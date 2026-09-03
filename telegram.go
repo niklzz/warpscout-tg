@@ -6,7 +6,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math/bits"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -27,43 +29,69 @@ var telegramDCs = []string{
 
 type dialFunc func(ctx context.Context, addr string) (net.Conn, error)
 
-// Every address at once under one deadline, first answer wins. Walking them in
-// turn would cost len(addrs) x timeout on a blocked exit, where each dial runs
-// the clock out in full - a scan pays that per endpoint. One reachable DC is
-// also all a client needs: it finds the rest through that one.
-func firstReachable(ctx context.Context, dial dialFunc, addrs []string, timeout time.Duration) (time.Duration, bool) {
+// allDCs is the reachedDCs mask with every entry of telegramDCs set.
+var allDCs = uint8(1<<len(telegramDCs)) - 1
+
+// Every address at once under one deadline. Walking them in turn would cost
+// len(addrs) x timeout on a blocked exit, where each dial runs the clock out
+// in full - a scan pays that per endpoint.
+//
+// An account lives on one DC and the client cannot pick another, so an exit
+// where only some DCs answer is an exit where some accounts never connect
+// (seen live: WARP exits in FRA reached DC1/3/5 while DC2/4 never answered,
+// and Telegram Desktop sat in "connecting..."). reached is therefore a bitmask
+// (bit i = addrs[i]) and the caller wants all of it set; rtt is the slowest
+// answer, since the DC a client sits on may well be that one.
+func reachedDCs(ctx context.Context, dial dialFunc, addrs []string, timeout time.Duration) (rtt time.Duration, reached uint8) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	type result struct {
+		i   int
 		rtt time.Duration
 		ok  bool
 	}
 	res := make(chan result, len(addrs))
 	start := time.Now()
-	for _, addr := range addrs {
-		go func(addr string) {
+	for i, addr := range addrs {
+		go func(i int, addr string) {
 			conn, err := dial(ctx, addr)
 			if err != nil {
-				res <- result{}
+				res <- result{i: i}
 				return
 			}
 			conn.Close()
-			res <- result{time.Since(start), true}
-		}(addr)
+			res <- result{i, time.Since(start), true}
+		}(i, addr)
 	}
 
 	for range addrs {
-		select {
-		case r := <-res:
-			if r.ok {
-				return r.rtt, true
-			}
-		case <-ctx.Done():
-			return 0, false
+		r := <-res // every dial honours ctx, so this returns by the deadline
+		if r.ok {
+			reached |= 1 << r.i
+			rtt = max(rtt, r.rtt)
 		}
 	}
-	return 0, false
+	return rtt, reached
+}
+
+// tgPartialStr renders a mask short of allDCs for the TG column.
+func tgPartialStr(reached uint8) string {
+	if reached == 0 {
+		return "blocked"
+	}
+	return fmt.Sprintf("%d/%d", bits.OnesCount8(reached), len(telegramDCs))
+}
+
+// dcNames lists the DCs in mask as "DC2, DC4".
+func dcNames(mask uint8) string {
+	var names []string
+	for i := range telegramDCs {
+		if mask&(1<<i) != 0 {
+			names = append(names, fmt.Sprintf("DC%d", i+1))
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // mtprotoProbe speaks just enough MTProto to make a DC answer: the
@@ -104,10 +132,11 @@ func mtprotoProbe(ctx context.Context, conn net.Conn) error {
 
 // Dialled through the tunnel's own stack rather than s.client: that client's
 // transport ignores the requested address and always dials metaDialAddr().
-// The dial only counts once the DC has answered an MTProto request, so the
-// reported RTT is time-to-first-response, not time-to-SYN-ACK.
-func (s *ipStack) telegramRTT(ctx context.Context, timeout time.Duration) (time.Duration, bool) {
-	return firstReachable(ctx, func(ctx context.Context, addr string) (net.Conn, error) {
+// A dial only counts once the DC has answered an MTProto request, so the
+// reported RTT is time-to-response, not time-to-SYN-ACK. reached is the mask
+// of DCs that answered; the row is Telegram-ok only when it equals allDCs.
+func (s *ipStack) telegramRTT(ctx context.Context, timeout time.Duration) (rtt time.Duration, reached uint8) {
+	return reachedDCs(ctx, func(ctx context.Context, addr string) (net.Conn, error) {
 		conn, err := s.tnet.DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, err

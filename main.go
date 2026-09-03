@@ -527,7 +527,8 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 			// very connection the row is about.
 			if opts.tg {
 				r.tgSeen = true
-				r.tg, r.tgOK = tn.stack().telegramRTT(ctx, timeout)
+				r.tg, r.tgDCs = tn.stack().telegramRTT(ctx, timeout)
+				r.tgOK = r.tgDCs == allDCs
 			}
 			// Host ICMP measures the direct path, which a nested run does not take;
 			// from inside the outer tunnel the same echo walks the real one.
@@ -538,7 +539,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 			} else if hrtt, pok := outer.pingTo(ip, timeout); pok {
 				r.epPing = hrtt
 			}
-			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, tg: r.tg, tgOK: r.tgOK, torn: !r.durable}
+			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, tg: r.tg, tgDCs: r.tgDCs, tgOK: r.tgOK, torn: !r.durable}
 			if opts.wantMeta {
 				found.exit, found.colo = exitRegion(t), exitColo(t)
 			}

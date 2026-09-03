@@ -55,8 +55,9 @@ type endpointResult struct {
 	tunPing  time.Duration // in-tunnel RTT to pingTarget, valid only when measured
 	loss     float32       // in-tunnel packet loss 0..1, valid only when measured
 	speed    float64       // in-tunnel download Mbit/s (-speed), 0 when not measured
-	tg       time.Duration // in-tunnel TCP RTT to the nearest Telegram DC, valid only when tgOK
-	tgOK     bool          // a Telegram DC answered through the tunnel
+	tg       time.Duration // in-tunnel RTT to the slowest Telegram DC, valid only when tgOK
+	tgDCs    uint8         // mask of telegramDCs that answered through the tunnel
+	tgOK     bool          // every Telegram DC answered (tgDCs == allDCs)
 	tgSeen   bool          // -tg ran here, which tells "blocked" apart from "not checked"
 	measured bool          // tunPing/loss were sampled (-tun-ping)
 	ok       bool
@@ -144,7 +145,7 @@ func tgStr(r endpointResult) string {
 	case !r.tgSeen:
 		return "-"
 	case !r.tgOK:
-		return "blocked"
+		return tgPartialStr(r.tgDCs)
 	}
 	return latencyStr(r.tg)
 }
@@ -384,7 +385,7 @@ func writeHeader(w io.Writer, working, probed int, ping, speed, tg bool) {
 		fmt.Fprintln(w, "# SPEED = download throughput measured inside the tunnel; the ordering does not depend on it")
 	}
 	if tg {
-		fmt.Fprintln(w, "# TG = TCP round-trip to the nearest Telegram MTProto DC, dialled inside the tunnel; \"blocked\" = no DC answered")
+		fmt.Fprintln(w, "# TG = MTProto round-trip to the slowest of the 5 Telegram DCs, dialled inside the tunnel; \"3/5\" = only some DCs answered, \"blocked\" = none did")
 	}
 	fmt.Fprintln(w, "# SEEN AS = region external services see through the tunnel")
 	fmt.Fprintln(w, "# NODE / NODE LOCATION = Cloudflare WARP edge node the tunnel landed on, and where it sits")
@@ -460,17 +461,23 @@ func writeTGNote(w io.Writer, st conStyles, working []endpointResult) {
 	if !anyTG(working) {
 		return
 	}
-	reached := 0
+	reached, missing := 0, allDCs
 	for _, r := range working {
 		if r.tgOK {
 			reached++
 		}
+		missing &^= r.tgDCs
 	}
 	count := st.ok.Render(strconv.Itoa(reached))
 	if reached == 0 {
 		count = st.fail.Render("0")
 	}
-	fmt.Fprintf(w, "Telegram:  %s\n", count+st.dim.Render(" / ")+strconv.Itoa(len(working))+" working endpoints reached a DC")
+	fmt.Fprintf(w, "Telegram:  %s\n", count+st.dim.Render(" / ")+strconv.Itoa(len(working))+" working endpoints reached all "+strconv.Itoa(len(telegramDCs))+" DCs")
+	// A DC no exit reaches is the usual reason the column is all partial:
+	// accounts homed there cannot connect through any of these endpoints.
+	if missing != 0 {
+		fmt.Fprintf(w, "           %s\n", st.fail.Render(dcNames(missing)+" never answered from any endpoint"))
+	}
 }
 
 func protoLine(run protoRun) string {

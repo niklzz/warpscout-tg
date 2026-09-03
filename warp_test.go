@@ -1632,7 +1632,7 @@ func TestReadVersionCache(t *testing.T) {
 	}
 }
 
-func TestFirstReachable(t *testing.T) {
+func TestReachedDCs(t *testing.T) {
 	answering := func(delays map[string]time.Duration) dialFunc {
 		return func(ctx context.Context, addr string) (net.Conn, error) {
 			d, ok := delays[addr]
@@ -1651,19 +1651,24 @@ func TestFirstReachable(t *testing.T) {
 	}
 	addrs := []string{"slow:443", "fast:443", "dead:443"}
 
-	rtt, ok := firstReachable(context.Background(), answering(map[string]time.Duration{
+	// One DC dead: the mask names the two that answered, the RTT is the slower
+	// one - a client homed on the slow DC sees that, not the fast one.
+	rtt, reached := reachedDCs(context.Background(), answering(map[string]time.Duration{
 		"slow:443": 300 * time.Millisecond,
 		"fast:443": 10 * time.Millisecond,
 	}), addrs, time.Second)
-	if !ok {
-		t.Fatal("firstReachable missed the DC that answered")
+	if reached != 0b011 {
+		t.Fatalf("reached = %03b, want slow and fast only", reached)
 	}
-	if rtt >= 300*time.Millisecond {
-		t.Errorf("firstReachable waited for the slow DC: rtt = %v", rtt)
+	if rtt < 300*time.Millisecond {
+		t.Errorf("rtt = %v, want the slowest DC's answer", rtt)
+	}
+	if reached == allDCs {
+		t.Error("a set with a dead DC must not count as all reached")
 	}
 
-	if _, ok := firstReachable(context.Background(), answering(nil), addrs, time.Second); ok {
-		t.Error("firstReachable reported a refused set as reachable")
+	if _, reached := reachedDCs(context.Background(), answering(nil), addrs, time.Second); reached != 0 {
+		t.Errorf("refused set reached = %03b, want none", reached)
 	}
 
 	// Every dial hangs: the shared deadline is the ceiling, not len(addrs) x timeout.
@@ -1672,11 +1677,21 @@ func TestFirstReachable(t *testing.T) {
 		return nil, ctx.Err()
 	}
 	start := time.Now()
-	if _, ok := firstReachable(context.Background(), hang, addrs, 100*time.Millisecond); ok {
-		t.Error("firstReachable reported a hanging set as reachable")
+	if _, reached := reachedDCs(context.Background(), hang, addrs, 100*time.Millisecond); reached != 0 {
+		t.Errorf("hanging set reached = %03b, want none", reached)
 	}
 	if waited := time.Since(start); waited > 500*time.Millisecond {
-		t.Errorf("firstReachable waited %v, want a single shared timeout", waited)
+		t.Errorf("reachedDCs waited %v, want a single shared timeout", waited)
+	}
+
+	if got := tgPartialStr(0); got != "blocked" {
+		t.Errorf("tgPartialStr(0) = %q", got)
+	}
+	if got := tgPartialStr(0b10101); got != "3/5" {
+		t.Errorf("tgPartialStr(DC1,3,5) = %q, want 3/5", got)
+	}
+	if got := dcNames(0b01010); got != "DC2, DC4" {
+		t.Errorf("dcNames = %q", got)
 	}
 }
 
@@ -1732,8 +1747,9 @@ func TestMTProtoProbe(t *testing.T) {
 }
 
 func TestTelegramColumn(t *testing.T) {
-	reached := endpointResult{endpoint: "1.2.3.4:2408", tg: 40 * time.Millisecond, tgOK: true, tgSeen: true, ok: true, durable: true}
+	reached := endpointResult{endpoint: "1.2.3.4:2408", tg: 40 * time.Millisecond, tgDCs: allDCs, tgOK: true, tgSeen: true, ok: true, durable: true}
 	blocked := endpointResult{endpoint: "5.6.7.8:2408", tgSeen: true, ok: true, durable: true}
+	partial := endpointResult{endpoint: "7.7.7.7:2408", tg: 300 * time.Millisecond, tgDCs: 0b10101, tgSeen: true, ok: true, durable: true}
 	unchecked := endpointResult{endpoint: "9.9.9.9:2408", ok: true, durable: true}
 
 	if !anyTG([]endpointResult{unchecked, blocked}) {
@@ -1745,18 +1761,33 @@ func TestTelegramColumn(t *testing.T) {
 	for _, c := range []struct {
 		r    endpointResult
 		want string
-	}{{reached, "40ms"}, {blocked, "blocked"}, {unchecked, "-"}} {
+	}{{reached, "40ms"}, {blocked, "blocked"}, {partial, "3/5"}, {unchecked, "-"}} {
 		if got := tgStr(c.r); got != c.want {
 			t.Errorf("tgStr(%s) = %q, want %q", c.r.endpoint, got, c.want)
 		}
 	}
 
 	var withTG bytes.Buffer
-	writeFullReport(&withTG, []endpointResult{reached, blocked}, false)
-	for _, want := range []string{"TG", "40ms", "blocked", "Telegram reachability"} {
+	writeFullReport(&withTG, []endpointResult{reached, blocked, partial}, false)
+	for _, want := range []string{"TG", "40ms", "blocked", "3/5", "Telegram reachability"} {
 		if !strings.Contains(withTG.String(), want) {
 			t.Errorf("-tg report is missing %q:\n%s", want, withTG.String())
 		}
+	}
+
+	// Only partial exits: the summary must name the DCs nobody reached, and a
+	// partial exit must not be counted as one that reached Telegram.
+	var onlyPartial bytes.Buffer
+	rPlain := lipgloss.NewRenderer(&onlyPartial)
+	rPlain.SetColorProfile(termenv.Ascii)
+	writeTGNote(&onlyPartial, newConStyles(rPlain), []endpointResult{partial})
+	for _, want := range []string{"0 / 1 working endpoints reached all 5 DCs", "DC2, DC4 never answered"} {
+		if !strings.Contains(onlyPartial.String(), want) {
+			t.Errorf("partial-only summary is missing %q:\n%s", want, onlyPartial.String())
+		}
+	}
+	if strings.Contains(withTG.String(), "never answered") {
+		t.Errorf("summary blames a DC that one endpoint did reach:\n%s", withTG.String())
 	}
 
 	var noTG bytes.Buffer
