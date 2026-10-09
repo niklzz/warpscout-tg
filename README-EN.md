@@ -14,6 +14,8 @@ This fork adds that check, and lets it decide:
 - **Reaching Telegram outranks every latency metric.** An endpoint that reached Telegram sorts above one that did not, whatever the ping says, so `-best` and `-conf` pick something that works.
 - **`-tg-only`** - throw the rest away (implies `-tg`). Since only Telegram-working endpoints survive, they are ranked by the Telegram RTT instead of the endpoint ping - `-best` and `-conf` take the one Telegram is fastest through. If nothing reaches Telegram, the scan says so and exits non-zero instead of writing a report full of useless endpoints.
 
+<p align="center"><img src="docs/scan-tg.png" alt="scan -p awg -tg output" width="600"><br><sub><code>scan -p awg -tg</code>: every endpoint brings a tunnel up, yet all five Telegram DCs answer only through some of Helsinki and Frankfurt; through Moscow (DME) Telegram does not work.</sub></p>
+
 Nothing else is changed: same protocols, same flags, same output, same account files. Everything below is the short version - **the full documentation is upstream, in [vernette/warpscout](https://github.com/vernette/warpscout)**, and it applies here as written.
 
 ## Install
