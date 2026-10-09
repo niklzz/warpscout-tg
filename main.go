@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -186,7 +187,10 @@ func runScanCmd(ctx context.Context, opts options) error {
 		return fmt.Errorf("%s", noEndpointMsg(opts))
 	}
 
-	if opts.speed && showsSpeed(opts) {
+	if (opts.speed || opts.bestBy == bestKeySpeed) && showsSpeed(opts) {
+		if !opts.speed {
+			fmt.Fprintln(os.Stderr, errPal.dim("\n-best-by speed ranks by throughput, so the speedtest phase runs even without -speed"))
+		}
 		runWithUI(opts, cancel, false, "", "q to skip the rest", func(emit emitter) {
 			measureSpeed(ctx, ph, time.Duration(opts.timeoutSec)*time.Second, emit)
 		})
@@ -235,6 +239,9 @@ func tablesFollow(opts options) bool {
 }
 
 func showsSpeed(opts options) bool {
+	if opts.bestBy == bestKeySpeed {
+		return true
+	}
 	if !opts.best && opts.conf != confStdout {
 		return true
 	}
@@ -400,12 +407,12 @@ func writeConfFile(opts options, ph phaseResult) error {
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
 	if outer != nil {
 		note := fmt.Sprintf("  it holds both tunnels of the chain (outer %s) - split it in two before use", outer.label)
-		if opts.confType == confTypeMihomo {
+		if isMihomo(opts.confType) {
 			note = fmt.Sprintf("  it chains through %s itself (dialer-proxy)", outer.label)
 		}
 		fmt.Fprintln(os.Stderr, errPal.dim(note))
 	}
-	if ph.run.isMASQUE() && opts.confType != confTypeMihomo {
+	if ph.run.isMASQUE() && !isMihomo(opts.confType) {
 		if _, port, err := net.SplitHostPort(best.endpoint); err == nil {
 			h2 := ""
 			if ph.run.isH2() {
@@ -465,14 +472,28 @@ func runWithUI(opts options, cancel context.CancelFunc, ping bool, header, quitH
 	p := tea.NewProgram(m, tea.WithOutput(os.Stderr))
 	defer enableVirtualTerminal()
 
+	// A terminal the TUI cannot drive is not a reason to fail the run.
+	// Fall back to the plain emitter and keep scanning.
+	var uiFailed atomic.Bool
+	emit := func(msg tea.Msg) {
+		if uiFailed.Load() {
+			plainEmit(msg)
+			return
+		}
+		p.Send(msg)
+	}
+
 	workDone := make(chan struct{})
 	go func() {
-		work(p.Send)
+		work(emit)
+		// Only doneMsg quits the program, and an error path returns without one:
+		// without this the TUI spins on forever under the failure it just printed.
+		emit(doneMsg{})
 		close(workDone)
 	}()
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-		return err
+		uiFailed.Store(true)
+		fmt.Fprintln(os.Stderr, errPal.fail("live output unavailable: "+err.Error()))
 	}
 	<-workDone
 	return nil
@@ -495,7 +516,11 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		warpPorts = ports
 		emit(stepMsg{done: true, label: "Port", summary: fmt.Sprintf("%d (pinned, phase 1 skipped)", opts.port)})
 	}
-	if !run.isMASQUE() && opts.port == 0 {
+	if opts.sweepPorts == sweepAll {
+		warpPorts = allWarpPorts()
+		emit(stepMsg{done: true, label: "Ports", summary: fmt.Sprintf("sweeping all %d known ports (phase 1 skipped)", len(warpPorts))})
+	}
+	if !run.isMASQUE() && opts.port == 0 && opts.sweepPorts != sweepAll {
 		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, opts.tunnelParallel, emit)
 		if err != nil {
 			emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
@@ -508,7 +533,10 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		warpPorts = open
 	}
 
-	targets := probeTargets(run, ips, ports)
+	if !run.isMASQUE() {
+		ports = warpPorts
+	}
+	targets := probeTargets(run, opts.sweepPorts != "", ips, ports)
 	results := make([]endpointResult, len(targets))
 	pings := opts.tunPingCount
 	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)

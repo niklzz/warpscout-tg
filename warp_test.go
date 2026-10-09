@@ -122,6 +122,24 @@ func TestLessByLossRTT(t *testing.T) {
 	}
 }
 
+func TestLessByLossRTTSpeed(t *testing.T) {
+	bestBy = bestKeySpeed
+	defer func() { bestBy = bestKeyPing }()
+
+	slowPing := endpointResult{endpoint: "a", epPing: 200 * time.Millisecond, speed: 90}
+	fastPing := endpointResult{endpoint: "b", epPing: 20 * time.Millisecond, speed: 9}
+	if !lessByLossRTT(slowPing, fastPing) {
+		t.Error("higher speed did not outrank lower ping")
+	}
+	unmeasured := endpointResult{endpoint: "c", epPing: 10 * time.Millisecond}
+	if !lessByLossRTT(fastPing, unmeasured) {
+		t.Error("an unmeasured endpoint outranked a measured one")
+	}
+	if !lessByLossRTT(unmeasured, endpointResult{endpoint: "d", epPing: 90 * time.Millisecond}) {
+		t.Error("with no speed measured the order stopped following ping")
+	}
+}
+
 func TestPingDiagnostics(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -315,8 +333,10 @@ func TestRenderMihomoConf(t *testing.T) {
 	for _, want := range []string{
 		"proxies:",
 		"- name: \"AWG WARP\"",
-		"server: 188.114.98.5",
-		"port: 2408",
+		"peers:",
+		"      - server: 188.114.98.5",
+		"        port: 2408",
+		"        persistent-keepalive: 25",
 		"type: wireguard",
 		"private-key: " + warpPrivateKey,
 		"public-key: " + warpPublicKey,
@@ -344,12 +364,12 @@ func TestRenderMihomoConf(t *testing.T) {
 		t.Fatal(err)
 	}
 	v6 := string(conf)
-	for _, want := range []string{"server: 2606:4700:d0::1", "ipv6: " + warpAddressV6, "allowed-ips: ['::/0']", "dns: [" + warpDNSv6 + "]"} {
+	for _, want := range []string{"server: 2606:4700:d0::1", "ipv6: " + warpAddressV6, "allowed-ips: ['::/0']", "dns: ['2606:4700:4700::1111', '2606:4700:4700::1001']"} {
 		if !strings.Contains(v6, want) {
 			t.Errorf("IPv6 mihomo config missing %q:\n%s", want, v6)
 		}
 	}
-	if strings.Contains(v6, "ip: ") || strings.Contains(v6, "1.1.1.1") {
+	if strings.Contains(v6, "  ip: ") || strings.Contains(v6, "1.1.1.1") {
 		t.Errorf("IPv6 config must not carry IPv4:\n%s", v6)
 	}
 
@@ -413,6 +433,73 @@ func TestRenderMihomoConfChained(t *testing.T) {
 	}
 	if strings.Contains(got, "mtu: 1280") {
 		t.Errorf("only the inner proxy takes an MTU without -mtu:\n%s", got)
+	}
+}
+
+func TestRenderMihomoJSON(t *testing.T) {
+	conf, err := renderMihomoConf(options{confType: confTypeMihomoJSON}, "188.114.98.5:2408", protoRun{kindAWG, protoAWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proxies []map[string]any
+	if err := json.Unmarshal(conf, &proxies); err != nil {
+		t.Fatalf("%v:\n%s", err, conf)
+	}
+	if len(proxies) != 1 {
+		t.Fatalf("got %d proxies, want 1:\n%s", len(proxies), conf)
+	}
+	p := proxies[0]
+	if p["name"] != "AWG WARP" || p["type"] != "wireguard" || p["udp"] != true {
+		t.Errorf("proxy fields wrong:\n%s", conf)
+	}
+	peers, ok := p["peers"].([]any)
+	if !ok || len(peers) != 1 {
+		t.Fatalf("peers missing:\n%s", conf)
+	}
+	peer := peers[0].(map[string]any)
+	if peer["server"] != "188.114.98.5" {
+		t.Errorf("peer server wrong:\n%s", conf)
+	}
+	if peer["port"] != float64(2408) {
+		t.Errorf("port %#v is not a JSON number:\n%s", peer["port"], conf)
+	}
+	if dns, _ := p["dns"].([]any); len(dns) != 2 {
+		t.Errorf("dns must be a list of two resolvers:\n%s", conf)
+	}
+	if !strings.Contains(string(conf), "<r 2>") {
+		t.Errorf("i1 must not be HTML-escaped:\n%s", conf)
+	}
+	var last int
+	for _, key := range []string{"\"name\"", "\"type\"", "\"private-key\"", "\"ip\"", "\"peers\"", "\"amnezia-wg-option\"", "\"udp\"", "\"dns\""} {
+		i := strings.Index(string(conf), key)
+		if i < last {
+			t.Fatalf("%s is out of order:\n%s", key, conf)
+		}
+		last = i
+	}
+}
+
+func TestRenderMihomoJSONChained(t *testing.T) {
+	outerAcct = &account{PrivateKey: "outerPriv=", PeerPublicKey: "outerPub=", IPv4: "172.16.0.9"}
+	outer = &nest{run: protoRun{kindAWG, protoAWG}, endpoint: "188.114.97.177:2408", label: "188.114.97.177:2408 (awg)"}
+	defer func() { outer, outerAcct = nil, nil }()
+
+	conf, err := renderMihomoConf(options{confType: confTypeMihomoJSON}, "8.47.69.130:2408", protoRun{kindWG, protoWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proxies []map[string]any
+	if err := json.Unmarshal(conf, &proxies); err != nil {
+		t.Fatalf("%v:\n%s", err, conf)
+	}
+	if len(proxies) != 2 {
+		t.Fatalf("got %d proxies, want 2:\n%s", len(proxies), conf)
+	}
+	if proxies[0]["name"] != "AWG WARP OUTER" || proxies[1]["dialer-proxy"] != "AWG WARP OUTER" {
+		t.Errorf("the inner proxy must dial through the outer one:\n%s", conf)
+	}
+	if _, ok := proxies[0]["dns"]; ok {
+		t.Errorf("the carrier takes no resolvers:\n%s", conf)
 	}
 }
 
@@ -616,7 +703,7 @@ func TestProbeTargets(t *testing.T) {
 	ips := []netip.Addr{netip.MustParseAddr("162.159.198.1"), netip.MustParseAddr("162.159.198.2")}
 	ports := []int{443, 8443}
 
-	wg := probeTargets(protoRun{kindAWG, protoAWG}, ips, ports)
+	wg := probeTargets(protoRun{kindAWG, protoAWG}, false, ips, ports)
 	if len(wg) != len(ips) {
 		t.Fatalf("wg targets = %d, want one per address", len(wg))
 	}
@@ -626,8 +713,17 @@ func TestProbeTargets(t *testing.T) {
 		}
 	}
 
-	// Working ports differ per MASQUE address, so every pair must be its own row.
-	masque := probeTargets(protoRun{kindMASQUE, protoMASQUE}, ips, ports)
+	swept := probeTargets(protoRun{kindAWG, protoAWG}, true, ips, ports)
+	if len(swept) != len(ips)*len(ports) {
+		t.Fatalf("swept targets = %d, want %d", len(swept), len(ips)*len(ports))
+	}
+	for _, tg := range swept {
+		if tg.port == 0 {
+			t.Errorf("swept target %v pins no port", tg)
+		}
+	}
+
+	masque := probeTargets(protoRun{kindMASQUE, protoMASQUE}, false, ips, ports)
 	if len(masque) != len(ips)*len(ports) {
 		t.Fatalf("masque targets = %d, want %d", len(masque), len(ips)*len(ports))
 	}

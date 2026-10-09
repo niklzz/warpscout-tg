@@ -185,19 +185,31 @@ func sortNote(ping, tg bool) string {
 
 func bestNote(ping, tg bool) string {
 	if tg && tgSort {
-		return "lowest Telegram RTT, then lowest " + rankNote(ping)
+		return "lowest Telegram RTT, then " + bestRankNote(ping)
 	}
 	if tg {
-		return "Telegram reachable first, then lowest " + rankNote(ping)
+		return "Telegram reachable first, then " + bestRankNote(ping)
 	}
-	return "lowest " + rankNote(ping)
+	return bestRankNote(ping)
 }
 
+// rankNote names what the ordering falls back to after Telegram; -best-by speed
+// replaces that metric, which is also where "lowest" stops being the right word.
 func rankNote(ping bool) string {
+	if bestBy == bestKeySpeed {
+		return "download speed"
+	}
 	if ping {
 		return "in-tunnel loss, then in-tunnel ping"
 	}
 	return "ping to the endpoint"
+}
+
+func bestRankNote(ping bool) string {
+	if bestBy == bestKeySpeed {
+		return "highest download speed"
+	}
+	return "lowest " + rankNote(ping)
 }
 
 func latencyStr(d time.Duration) string {
@@ -318,6 +330,15 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 // Set once in setupScan, like the rest of the flag globals.
 var tgSort bool
 
+const (
+	bestKeyPing  = "ping"
+	bestKeySpeed = "speed"
+)
+
+var bestKeys = []string{bestKeyPing, bestKeySpeed}
+
+var bestBy = bestKeyPing
+
 // Loss before ping, mirroring CloudflareWarpSpeedTest. Unmeasured endpoints
 // carry loss 0, so without -tun-ping this degrades to ping-only ordering.
 //
@@ -330,6 +351,9 @@ func lessByLossRTT(a, b endpointResult) bool {
 	}
 	if tgSort && a.tgOK && a.tg != b.tg {
 		return a.tg < b.tg
+	}
+	if bestBy == bestKeySpeed && a.speed != b.speed {
+		return a.speed > b.speed // unmeasured is 0, so it sinks
 	}
 	if a.loss != b.loss {
 		return a.loss < b.loss
@@ -379,10 +403,14 @@ func writeHeader(w io.Writer, working, probed int, ping, speed, tg bool) {
 		fmt.Fprintln(w, "# ENDPOINT PING = ICMP ping to the endpoint address from this host, no tunnel involved")
 	}
 	if ping {
-		fmt.Fprintf(w, "# TUN PING / LOSS = RTT and packet loss measured inside the tunnel, to %s\n", pingTarget)
+		fmt.Fprintf(w, "# TUN PING / LOSS = RTT and packet loss measured inside the tunnel, to %s\n", pingTargetLabel())
 	}
 	if speed {
-		fmt.Fprintln(w, "# SPEED = download throughput measured inside the tunnel; the ordering does not depend on it")
+		note := "the ordering does not depend on it"
+		if bestBy == bestKeySpeed {
+			note = "only the endpoints the tables pick are measured, so the rest sort last"
+		}
+		fmt.Fprintf(w, "# SPEED = download throughput measured inside the tunnel; %s\n", note)
 	}
 	if tg {
 		fmt.Fprintln(w, "# TG = MTProto round-trip to the slowest of the 5 Telegram DCs, dialled inside the tunnel; \"3/5\" = only some DCs answered, \"blocked\" = none did")
@@ -451,6 +479,9 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	writeJunkNote(w, st, ph.run)
 	fmt.Fprintf(w, "Nodes:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
 	fmt.Fprintf(w, "Seen as:   %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
+	if ping {
+		fmt.Fprintf(w, "Ping to:   %s\n", st.accent.Render(pingTargetLabel()))
+	}
 	fmt.Fprintf(w, "Working:   %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
 	writeTornNote(w, st, len(torn))
 	writeTGNote(w, st, working)
@@ -529,6 +560,7 @@ type pickRow struct {
 	tg      time.Duration
 	loss    float32
 	latency time.Duration
+	speed   float64
 }
 
 func tunCells(r endpointResult, ping bool) []string {
@@ -567,7 +599,7 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 			for _, r := range nodePicks(picks) {
 				cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
 				cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
-				rows = append(rows, pickRow{cells, statusOK, r.tgOK, r.tg, r.loss, r.sortPing()})
+				rows = append(rows, pickRow{cells, statusOK, r.tgOK, r.tg, r.loss, r.sortPing(), r.speed})
 			}
 			continue
 		}
@@ -575,13 +607,13 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
 			cells = append(cells, "torn down", "", "")
-			rows = append(rows, pickRow{cells, statusTorn, r.tgOK, r.tg, r.loss, r.sortPing()})
+			rows = append(rows, pickRow{cells, statusTorn, r.tgOK, r.tg, r.loss, r.sortPing(), r.speed})
 			continue
 		}
 		cells := []string{subnet, "no working endpoints", ""}
 		cells = append(cells, make([]string, len(tunHeaders(ping))+len(tgHeaders(tg))+len(speedHeaders(speed)))...)
 		cells = append(cells, "", "", "")
-		rows = append(rows, pickRow{cells, statusNone, false, 0, 0, 0})
+		rows = append(rows, pickRow{cells, statusNone, false, 0, 0, 0, 0})
 	}
 	// Status first: a subnet with no result carries a synthetic 0% loss, which
 	// would otherwise sort it above a working endpoint that measured any loss.
@@ -595,6 +627,9 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 		}
 		if tgSort && rows[i].tgOK && rows[i].tg != rows[j].tg {
 			return rows[i].tg < rows[j].tg
+		}
+		if bestBy == bestKeySpeed && rows[i].speed != rows[j].speed {
+			return rows[i].speed > rows[j].speed
 		}
 		return lessLossDur(rows[i].loss, rows[i].latency, rows[j].loss, rows[j].latency)
 	})
@@ -655,10 +690,22 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string, fla
 	return strings.Join(vals, "  ")
 }
 
+// Set from -sweep-ports (flags.go), for the reason bestBy is a global: a run that
+// sweeps ports asks to compare them, so each ip:port keeps its own row instead of
+// collapsing into the fastest port of its node.
+var sweepingPorts bool
+
+func pickKey(r endpointResult) string {
+	if sweepingPorts {
+		return r.endpoint
+	}
+	return exitColo(r.exit)
+}
+
 func nodePicks(working []endpointResult) []endpointResult {
 	byNode := make(map[string][]endpointResult)
 	for _, r := range working {
-		byNode[exitColo(r.exit)] = append(byNode[exitColo(r.exit)], r)
+		byNode[pickKey(r)] = append(byNode[pickKey(r)], r)
 	}
 	picks := make([]endpointResult, 0, len(byNode))
 	for _, group := range byNode {
