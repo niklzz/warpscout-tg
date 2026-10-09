@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -124,11 +125,37 @@ func mtprotoProbe(ctx context.Context, conn net.Conn) error {
 		return err
 	}
 	// res_pq is ~84 bytes; anything outside a sane frame is not Telegram.
-	if n := binary.LittleEndian.Uint32(hdr[:]); n == 0 || n > 1<<16 {
+	n := binary.LittleEndian.Uint32(hdr[:])
+	if n < resPQMin || n > 1<<16 {
 		return fmt.Errorf("mtproto: implausible frame length %d", n)
+	}
+	// A plausible length alone is four bytes any middlebox can fake: read the
+	// body and hold it to res_pq, down to the nonce we just sent.
+	body := make([]byte, n)
+	if _, err := io.ReadFull(conn, body); err != nil {
+		return err
+	}
+	if id := binary.LittleEndian.Uint64(body[:8]); id != 0 {
+		return fmt.Errorf("mtproto: answer carries auth_key_id %#x, want a plaintext one", id)
+	}
+	if l := binary.LittleEndian.Uint32(body[16:20]); l < 4+16 || 20+int(l) > len(body) {
+		return fmt.Errorf("mtproto: message_data_length %d does not fit a %d-byte frame", l, n)
+	}
+	if c := binary.LittleEndian.Uint32(body[20:24]); c != 0x05162463 {
+		return fmt.Errorf("mtproto: answer constructor %#x, want res_pq", c)
+	}
+	// 128 random bits coming back is what proves something parsed our
+	// req_pq_multi, rather than answered with bytes of its own.
+	if !bytes.Equal(body[24:40], nonce[:]) {
+		return fmt.Errorf("mtproto: answer does not echo our nonce")
 	}
 	return nil
 }
+
+// Smallest res_pq worth reading: auth_key_id, msg_id, message_data_length,
+// then the constructor and our nonce. server_nonce, pq and the fingerprints
+// follow but are never looked at.
+const resPQMin = 8 + 8 + 4 + 4 + 16
 
 // Dialled through the tunnel's own stack rather than s.client: that client's
 // transport ignores the requested address and always dials metaDialAddr().

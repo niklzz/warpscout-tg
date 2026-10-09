@@ -1801,7 +1801,20 @@ func TestMTProtoProbe(t *testing.T) {
 		return mtprotoProbe(ctx, client)
 	}
 
-	answer := func(reply []byte) func(net.Conn) {
+	// A res_pq frame as a DC would send it; server_nonce, pq and fingerprints are
+	// zero padding, the probe stops reading at the nonce.
+	frame := func(authKey uint64, ctor uint32, nonce []byte) []byte {
+		data := binary.LittleEndian.AppendUint32(nil, ctor)
+		data = append(append(data, nonce...), make([]byte, 28)...)
+		out := binary.LittleEndian.AppendUint64(nil, authKey)
+		out = binary.LittleEndian.AppendUint64(out, 1<<32) // msg_id
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(data)))
+		out = append(out, data...)
+		return append(binary.LittleEndian.AppendUint32(nil, uint32(len(out))), out...)
+	}
+	const resPQ, reqPQ = 0x05162463, 0x60469778
+
+	answer := func(reply func(req []byte) []byte) func(net.Conn) {
 		return func(c net.Conn) {
 			defer c.Close()
 			req := make([]byte, 4+4+40)
@@ -1821,18 +1834,25 @@ func TestMTProtoProbe(t *testing.T) {
 			if c := binary.LittleEndian.Uint32(req[28:32]); c != 0xbe7e8ef1 {
 				t.Errorf("probe constructor = %#x, want req_pq_multi", c)
 			}
-			c.Write(reply)
+			c.Write(reply(req))
 		}
 	}
 
-	resPQ := binary.LittleEndian.AppendUint32(nil, 84)
-	resPQ = append(resPQ, make([]byte, 84)...)
-	if err := run(answer(resPQ)); err != nil {
+	// The nonce is the request's last 16 bytes.
+	if err := run(answer(func(req []byte) []byte { return frame(0, resPQ, req[32:48]) })); err != nil {
 		t.Errorf("probe against an answering DC: %v", err)
 	}
 
-	if err := run(answer(make([]byte, 4))); err == nil {
-		t.Error("probe accepted a zero-length frame")
+	for name, reply := range map[string]func(req []byte) []byte{
+		"a zero-length frame":          func([]byte) []byte { return make([]byte, 4) },
+		"a header with no body":        func([]byte) []byte { return binary.LittleEndian.AppendUint32(nil, 84) },
+		"an answer to another nonce":   func([]byte) []byte { return frame(0, resPQ, make([]byte, 16)) },
+		"an answer that is not res_pq": func(req []byte) []byte { return frame(0, reqPQ, req[32:48]) },
+		"an encrypted answer":          func(req []byte) []byte { return frame(1, resPQ, req[32:48]) },
+	} {
+		if err := run(answer(reply)); err == nil {
+			t.Errorf("probe accepted %s", name)
+		}
 	}
 
 	// A DPI box that completes the handshake and eats the payload: the read
