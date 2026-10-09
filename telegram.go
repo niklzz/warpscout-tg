@@ -53,9 +53,12 @@ func reachedDCs(ctx context.Context, dial dialFunc, addrs []string, timeout time
 		ok  bool
 	}
 	res := make(chan result, len(addrs))
-	start := time.Now()
 	for i, addr := range addrs {
 		go func(i int, addr string) {
+			// Each dial times itself: one shared start would bill the wait for a
+			// goroutine to get scheduled (real under a loaded pool) to the DC, and
+			// this number is what the TG column reports.
+			start := time.Now()
 			conn, err := dial(ctx, addr)
 			if err != nil {
 				res <- result{i: i}
